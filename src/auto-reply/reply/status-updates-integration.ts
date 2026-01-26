@@ -88,7 +88,7 @@ export function mapAgentEventToPhase(event: {
 
   if (stream === "lifecycle") {
     if (phase === "start") return "sending_query";
-    if (phase === "end") return "complete";
+    // Don't map "end" -> "complete" - let completeStatusUpdate handle final edit
   }
 
   if (stream === "tool") {

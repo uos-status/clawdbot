@@ -52,6 +52,18 @@ export function recordSentMessage(
 }
 
 /**
+ * Invalidate the "status" flag of the last sent message.
+ * This prevents subsequent messages from overwriting it.
+ */
+export function invalidateLastStatus(chatId: number | string): void {
+  const key = getChatKey(chatId);
+  const entry = sentMessages.get(key);
+  if (entry?.lastSent) {
+    entry.lastSent.isStatus = false;
+  }
+}
+
+/**
  * Get the last sent message ID and timestamp for a chat.
  */
 export function getLastSentMessage(

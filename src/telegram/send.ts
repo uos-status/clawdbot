@@ -19,7 +19,7 @@ import { resolveTelegramFetch } from "./fetch.js";
 import { renderTelegramHtmlText } from "./format.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
 import { splitTelegramCaption } from "./caption.js";
-import { getLastSentMessage, recordSentMessage } from "./sent-message-cache.js";
+import { recordSentMessage } from "./sent-message-cache.js";
 import { parseTelegramTarget, stripTelegramInternalPrefixes } from "./targets.js";
 import { resolveTelegramVoiceSend } from "./voice.js";
 import { buildTelegramThreadParams } from "./bot/helpers.js";
@@ -204,49 +204,8 @@ export async function sendMessageTelegram(
   const linkPreviewOptions = linkPreviewEnabled ? undefined : { is_disabled: true };
 
   // Status message optimization:
-  // If this is a status message, try to edit the last status message in the chat
-  // if it was sent recently.
-  if (opts.isStatusMessage && !mediaUrl && !opts.asVoice && text) {
-    const lastSent = getLastSentMessage(chatId);
-    const now = Date.now();
-    const STATUS_WINDOW_MS = 10000;
-
-    if (lastSent && lastSent.isStatus && now - lastSent.timestamp < STATUS_WINDOW_MS) {
-      try {
-        const editOpts: TelegramEditOpts = {
-          token: opts.token,
-          accountId: opts.accountId,
-          verbose: opts.verbose,
-          api: api,
-          retry: opts.retry,
-          textMode: opts.textMode,
-          buttons: opts.buttons,
-        };
-        await editMessageTelegram(chatId, lastSent.messageId, text, editOpts);
-
-        // Update timestamp, keep isStatus=true
-        recordSentMessage(chatId, lastSent.messageId, true);
-
-        return {
-          messageId: String(lastSent.messageId),
-          chatId: chatId,
-        };
-      } catch (err) {
-        const errText = formatErrorMessage(err);
-        // "message is not modified" means content was identical; treat as success.
-        if (/message is not modified/i.test(errText)) {
-          recordSentMessage(chatId, lastSent.messageId, true);
-          return {
-            messageId: String(lastSent.messageId),
-            chatId: chatId,
-          };
-        }
-        if (opts.verbose) {
-          console.warn(`[telegram] Status message edit failed, falling back to send: ${errText}`);
-        }
-      }
-    }
-  }
+  // Moved to delivery.ts to centralize logic.
+  // We no longer attempt to optimize here to avoid race conditions and split-brain logic.
 
   const sendTelegramText = async (
     rawText: string,

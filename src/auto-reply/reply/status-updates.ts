@@ -97,12 +97,10 @@ export function resolveStatusUpdateConfig(
 }
 
 function formatElapsedTime(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  return `${minutes}m ${remainingSeconds}s`;
+  const paddedSeconds = remainingSeconds.toString().padStart(2, "0");
+  return `${minutes}:${paddedSeconds}`;
 }
 
 function formatStatusMessage(
@@ -120,7 +118,7 @@ function formatStatusMessage(
 
   if (config.showElapsedTime && elapsedSeconds * 1000 >= config.elapsedTimeThresholdMs) {
     const elapsed = formatElapsedTime(elapsedSeconds);
-    parts.push(`(${elapsed} elapsed)`);
+    parts.push(`(${elapsed})`);
   }
 
   return parts.join(" ") || "Processing...";
@@ -187,6 +185,7 @@ export class StatusUpdateController {
     if (phase === "complete") {
       this.state.isComplete = true;
       this.stopUpdateTimer();
+      return; // Suppress redundant sendUpdate for "complete" phase
     }
 
     await this.sendUpdate();
@@ -204,18 +203,9 @@ export class StatusUpdateController {
     // If we have a final text and config says to mark with checkmark
     if (finalText && this.config.markFinalWithCheckmark) {
       this.state.elapsedSeconds = Math.floor((Date.now() - this.state.startedAt) / 1000);
-      const marked = `${finalText.trimEnd()} (${formatElapsedTime(this.state.elapsedSeconds)})`;
-
-      // If we can edit and have a status message, edit it with the final content
-      if (this.supportsEdit() && this.state.statusMessageId && this.callbacks.editFinal) {
-        try {
-          await this.callbacks.editFinal(marked, this.state.statusMessageId);
-          this.editedInPlace = true;
-          return marked;
-        } catch (err) {
-          log.debug(`Failed to edit final status: ${String(err)}`);
-        }
-      }
+      // NOTE: We rely on Telegram delivery to do the edit/replacement, so we just format
+      // the string correctly for the final response.
+      const marked = `${finalText.trimEnd()} _(${formatElapsedTime(this.state.elapsedSeconds)})_`;
 
       return marked;
     }

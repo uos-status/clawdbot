@@ -132,6 +132,7 @@ export class StatusUpdateController {
   private state: StatusUpdateState;
   private updateTimer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private editedInPlace: boolean = false;
 
   constructor(config: StatusUpdateConfig, callbacks: StatusUpdateCallbacks) {
     this.config = resolveStatusUpdateConfig(config);
@@ -147,6 +148,10 @@ export class StatusUpdateController {
 
   isEnabled(): boolean {
     return this.config.enabled && this.config.mode !== "off";
+  }
+
+  wasEditedInPlace(): boolean {
+    return this.editedInPlace;
   }
 
   supportsEdit(): boolean {
@@ -194,12 +199,14 @@ export class StatusUpdateController {
 
     // If we have a final text and config says to mark with checkmark
     if (finalText && this.config.markFinalWithCheckmark) {
-      const marked = `${finalText.trimEnd()} ✅`;
+      this.state.elapsedSeconds = Math.floor((Date.now() - this.state.startedAt) / 1000);
+      const marked = `${finalText.trimEnd()} (${formatElapsedTime(this.state.elapsedSeconds)})`;
 
       // If we can edit and have a status message, edit it with the final content
       if (this.supportsEdit() && this.state.statusMessageId && this.callbacks.editFinal) {
         try {
           await this.callbacks.editFinal(marked, this.state.statusMessageId);
+          this.editedInPlace = true;
           return marked;
         } catch (err) {
           log.debug(`Failed to edit final status: ${String(err)}`);

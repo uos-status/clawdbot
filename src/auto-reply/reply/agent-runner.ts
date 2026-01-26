@@ -48,7 +48,6 @@ import {
   cleanupStatusUpdate,
   handleAgentEventForStatus,
   noopStatusCallbacks,
-  type StatusUpdateRunContext,
 } from "./status-updates-integration.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 
@@ -325,15 +324,30 @@ export async function runReplyAgent(params: {
   // NOTE: Edit mode requires channel-specific edit APIs which aren't available
   // at the agent-runner level. Use mode="inline" in config for now.
   // Telegram/Discord support editing but need integration at dispatch level.
+  let lastStatusMessageId: string | undefined;
   const statusCallbacks = optsWithRunId?.onBlockReply
     ? {
         sendStatus: async (text: string, _messageId?: string) => {
           log.debug(`Sending status update: ${text}`);
           // Send as new message via block reply
-          await optsWithRunId.onBlockReply?.({ text, isStatusMessage: true }, { timeoutMs: 3000 });
-          return undefined; // Inline mode doesn't track message IDs
+          const res = await optsWithRunId.onBlockReply?.(
+            { text, isStatusMessage: true },
+            { timeoutMs: 3000 },
+          );
+          if (typeof res === "string") {
+            lastStatusMessageId = res;
+            return res;
+          }
+          return undefined;
         },
-        supportsEdit: () => false, // Edit mode not implemented yet
+        editFinal: async (text: string, messageId: string) => {
+          log.debug(`Editing final status update: ${messageId} (tracked: ${lastStatusMessageId})`);
+          await optsWithRunId.onBlockReply?.(
+            { text, isStatusMessage: true, editMessageId: messageId },
+            { timeoutMs: 3000 },
+          );
+        },
+        supportsEdit: () => true,
       }
     : noopStatusCallbacks;
 
@@ -577,7 +591,11 @@ export async function runReplyAgent(params: {
       if (lastPayload?.text) {
         log.info(`Completing status update with final text`);
         const markedText = await completeStatusUpdate(statusUpdateContext, lastPayload.text);
-        if (markedText && markedText !== lastPayload.text) {
+
+        if (statusUpdateContext.controller?.wasEditedInPlace()) {
+          log.info(`Status update edited in place, skipping duplicate final message`);
+          finalPayloads.pop();
+        } else if (markedText && markedText !== lastPayload.text) {
           finalPayloads[finalPayloads.length - 1] = { ...lastPayload, text: markedText };
         }
       }

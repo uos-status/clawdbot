@@ -322,17 +322,20 @@ export async function runReplyAgent(params: {
   log.info(`Setting up status updates for agentId=${agentId}, channel=${replyToChannel}`);
 
   // Create callbacks using onBlockReply if available
-  const statusCallbacks =
-    optsWithRunId?.onBlockReply
-      ? {
-          sendStatus: async (text: string, _messageId?: string) => {
-            log.debug(`Sending status update: ${text}`);
-            await optsWithRunId.onBlockReply?.({ text }, { timeoutMs: 3000 });
-            return undefined; // Inline mode doesn't track message IDs
-          },
-          supportsEdit: () => false, // Use inline mode for now
-        }
-      : noopStatusCallbacks;
+  // NOTE: Edit mode requires channel-specific edit APIs which aren't available
+  // at the agent-runner level. Use mode="inline" in config for now.
+  // Telegram/Discord support editing but need integration at dispatch level.
+  const statusCallbacks = optsWithRunId?.onBlockReply
+    ? {
+        sendStatus: async (text: string, _messageId?: string) => {
+          log.debug(`Sending status update: ${text}`);
+          // Send as new message via block reply
+          await optsWithRunId.onBlockReply?.({ text, isStatusMessage: true }, { timeoutMs: 3000 });
+          return undefined; // Inline mode doesn't track message IDs
+        },
+        supportsEdit: () => false, // Edit mode not implemented yet
+      }
+    : noopStatusCallbacks;
 
   const statusController = createAgentStatusController({
     cfg,

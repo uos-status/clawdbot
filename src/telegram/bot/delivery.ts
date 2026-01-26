@@ -1,3 +1,4 @@
+import { sendMessageTelegram } from "../send.js";
 import { type Bot, InputFile } from "grammy";
 import {
   markdownToTelegramChunks,
@@ -27,6 +28,7 @@ export async function deliverReplies(params: {
   replies: ReplyPayload[];
   chatId: string;
   token: string;
+  accountId?: string;
   runtime: RuntimeEnv;
   bot: Bot;
   replyToMode: ReplyToMode;
@@ -80,6 +82,16 @@ export async function deliverReplies(params: {
         ? [reply.mediaUrl]
         : [];
     if (mediaList.length === 0) {
+      if (reply.isStatusMessage && reply.text) {
+        await sendMessageTelegram(chatId, reply.text, {
+          token: params.token,
+          accountId: params.accountId,
+          api: bot.api,
+          isStatusMessage: true,
+          messageThreadId,
+        });
+        continue;
+      }
       const chunks = chunkText(reply.text || "");
       for (const chunk of chunks) {
         await sendTelegramText(bot, chatId, chunk.html, runtime, {

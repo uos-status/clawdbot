@@ -51,5 +51,6 @@ export type ReplyPayload = {
   replyToCurrent?: boolean;
   /** Send audio as voice message (bubble) instead of audio file. Defaults to false. */
   audioAsVoice?: boolean;
+  isStatusMessage?: boolean;
   isError?: boolean;
 };

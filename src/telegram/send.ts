@@ -19,7 +19,11 @@ import { resolveTelegramFetch } from "./fetch.js";
 import { renderTelegramHtmlText } from "./format.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
 import { splitTelegramCaption } from "./caption.js";
-import { recordSentMessage } from "./sent-message-cache.js";
+import {
+  getLastStatusMessage,
+  recordSentMessage,
+  recordStatusMessage,
+} from "./sent-message-cache.js";
 import { parseTelegramTarget, stripTelegramInternalPrefixes } from "./targets.js";
 import { resolveTelegramVoiceSend } from "./voice.js";
 import { buildTelegramThreadParams } from "./bot/helpers.js";
@@ -42,6 +46,7 @@ type TelegramSendOpts = {
   messageThreadId?: number;
   /** Inline keyboard buttons (reply markup). */
   buttons?: Array<Array<{ text: string; callback_data: string }>>;
+  isStatusMessage?: boolean;
 };
 
 type TelegramSendResult = {
@@ -202,6 +207,51 @@ export async function sendMessageTelegram(
   const linkPreviewEnabled = account.config.linkPreview ?? true;
   const linkPreviewOptions = linkPreviewEnabled ? undefined : { is_disabled: true };
 
+  // Status message optimization:
+  // If this is a status message, try to edit the last status message in the chat
+  // if it was sent recently.
+  if (opts.isStatusMessage && !mediaUrl && !opts.asVoice && text) {
+    const lastStatus = getLastStatusMessage(chatId);
+    const now = Date.now();
+    const STATUS_WINDOW_MS = 10000;
+
+    if (lastStatus && now - lastStatus.timestamp < STATUS_WINDOW_MS) {
+      try {
+        const editOpts: TelegramEditOpts = {
+          token: opts.token,
+          accountId: opts.accountId,
+          verbose: opts.verbose,
+          api: api,
+          retry: opts.retry,
+          textMode: opts.textMode,
+          buttons: opts.buttons,
+        };
+        await editMessageTelegram(chatId, lastStatus.messageId, text, editOpts);
+
+        // Update timestamp
+        recordStatusMessage(chatId, lastStatus.messageId);
+
+        return {
+          messageId: String(lastStatus.messageId),
+          chatId: chatId,
+        };
+      } catch (err) {
+        const errText = formatErrorMessage(err);
+        // "message is not modified" means content was identical; treat as success.
+        if (/message is not modified/i.test(errText)) {
+          recordStatusMessage(chatId, lastStatus.messageId);
+          return {
+            messageId: String(lastStatus.messageId),
+            chatId: chatId,
+          };
+        }
+        if (opts.verbose) {
+          console.warn(`[telegram] Status message edit failed, falling back to send: ${errText}`);
+        }
+      }
+    }
+  }
+
   const sendTelegramText = async (
     rawText: string,
     params?: Record<string, unknown>,
@@ -324,7 +374,11 @@ export async function sendMessageTelegram(
     const mediaMessageId = String(result?.message_id ?? "unknown");
     const resolvedChatId = String(result?.chat?.id ?? chatId);
     if (result?.message_id) {
-      recordSentMessage(chatId, result.message_id);
+      if (opts.isStatusMessage) {
+        recordStatusMessage(chatId, result.message_id);
+      } else {
+        recordSentMessage(chatId, result.message_id);
+      }
     }
     recordChannelActivity({
       channel: "telegram",
@@ -366,7 +420,11 @@ export async function sendMessageTelegram(
   const res = await sendTelegramText(text, textParams, opts.plainText);
   const messageId = String(res?.message_id ?? "unknown");
   if (res?.message_id) {
-    recordSentMessage(chatId, res.message_id);
+    if (opts.isStatusMessage) {
+      recordStatusMessage(chatId, res.message_id);
+    } else {
+      recordSentMessage(chatId, res.message_id);
+    }
   }
   recordChannelActivity({
     channel: "telegram",
@@ -448,6 +506,87 @@ export async function deleteMessageTelegram(
   });
   await request(() => api.deleteMessage(chatId, messageId), "deleteMessage");
   logVerbose(`[telegram] Deleted message ${messageId} from chat ${chatId}`);
+  return { ok: true };
+}
+
+type TelegramEditOpts = {
+  token?: string;
+  accountId?: string;
+  verbose?: boolean;
+  api?: Bot["api"];
+  retry?: RetryConfig;
+  textMode?: "markdown" | "html";
+  buttons?: TelegramSendOpts["buttons"];
+};
+
+export async function editMessageTelegram(
+  chatIdInput: string | number,
+  messageIdInput: string | number,
+  text: string,
+  opts: TelegramEditOpts = {},
+): Promise<{ ok: true }> {
+  const cfg = loadConfig();
+  const account = resolveTelegramAccount({
+    cfg,
+    accountId: opts.accountId,
+  });
+  const token = resolveToken(opts.token, account);
+  const chatId = normalizeChatId(String(chatIdInput));
+  const messageId = normalizeMessageId(messageIdInput);
+  const fetchImpl = resolveTelegramFetch();
+  const client: ApiClientOptions | undefined = fetchImpl
+    ? { fetch: fetchImpl as unknown as ApiClientOptions["fetch"] }
+    : undefined;
+  const api = opts.api ?? new Bot(token, client ? { client } : undefined).api;
+  const request = createTelegramRetryRunner({
+    retry: opts.retry,
+    configRetry: account.config.retry,
+    verbose: opts.verbose,
+  });
+  const replyMarkup = buildInlineKeyboard(opts.buttons);
+
+  const renderHtmlText = (rawText: string) =>
+    renderTelegramHtmlText(rawText, {
+      tableMode: resolveMarkdownTableMode({
+        cfg,
+        channel: "telegram",
+        accountId: opts.accountId,
+      }),
+    });
+
+  const textMode = opts.textMode ?? "html";
+  const htmlText = textMode === "html" ? renderHtmlText(text) : text;
+
+  try {
+    await request(
+      () =>
+        api.editMessageText(chatId, messageId, htmlText, {
+          parse_mode: textMode === "html" ? "HTML" : "MarkdownV2",
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        }),
+      "editMessage",
+    );
+    logVerbose(`[telegram] Edited message ${messageId} in chat ${chatId}`);
+  } catch (err) {
+    // If HTML parsing fails, fall back to plain text
+    const errText = formatErrorMessage(err);
+    if (PARSE_ERR_RE.test(errText)) {
+      if (opts.verbose) {
+        console.warn(`telegram HTML parse failed on edit, retrying as plain text: ${errText}`);
+      }
+      await request(
+        () =>
+          api.editMessageText(chatId, messageId, text, {
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+          }),
+        "editMessage-plain",
+      );
+      logVerbose(`[telegram] Edited message ${messageId} in chat ${chatId} (plain text fallback)`);
+    } else {
+      throw err;
+    }
+  }
+
   return { ok: true };
 }
 

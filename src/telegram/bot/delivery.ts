@@ -1,4 +1,4 @@
-import { sendMessageTelegram, editMessageTelegram } from "../send.js";
+import { sendMessageTelegram } from "../send.js";
 import { type Bot, InputFile } from "grammy";
 import {
   markdownToTelegramChunks,
@@ -83,23 +83,13 @@ export async function deliverReplies(params: {
         : [];
     if (mediaList.length === 0) {
       if (reply.isStatusMessage && reply.text) {
-        // If editMessageId is provided, edit the existing status message
-        if (reply.editMessageId) {
-          await editMessageTelegram(chatId, reply.editMessageId, reply.text, {
-            token: params.token,
-            accountId: params.accountId,
-            api: bot.api,
-          });
-        } else {
-          // Otherwise send a new status message
-          await sendMessageTelegram(chatId, reply.text, {
-            token: params.token,
-            accountId: params.accountId,
-            api: bot.api,
-            isStatusMessage: true,
-            messageThreadId,
-          });
-        }
+        await sendMessageTelegram(chatId, reply.text, {
+          token: params.token,
+          accountId: params.accountId,
+          api: bot.api,
+          isStatusMessage: true,
+          messageThreadId,
+        });
         continue;
       }
       const chunks = chunkText(reply.text || "");

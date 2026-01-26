@@ -268,7 +268,7 @@ const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.statusUpdates.updateIntervalMs": "Status Update Interval (ms)",
   "agents.defaults.statusUpdates.showPhases": "Show Processing Phases",
   "agents.defaults.statusUpdates.showElapsedTime": "Show Elapsed Time",
-  "agents.defaults.statusUpdates.markFinalWithCheckmark": "Mark Final with ✅",
+
   "agents.defaults.statusUpdates.elapsedTimeThresholdMs": "Elapsed Time Threshold (ms)",
   "agents.defaults.cliBackends": "CLI Backends",
   "commands.native": "Native Commands",

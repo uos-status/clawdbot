@@ -184,8 +184,7 @@ export type StatusUpdateConfig = {
   showPhases?: boolean;
   /** Show elapsed time in status messages (default: true). */
   showElapsedTime?: boolean;
-  /** Mark final responses with ✅ (default: true). */
-  markFinalWithCheckmark?: boolean;
+
   /** Minimum duration before showing elapsed time (ms, default: 3000). */
   elapsedTimeThresholdMs?: number;
 };

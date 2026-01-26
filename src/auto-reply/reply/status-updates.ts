@@ -67,7 +67,7 @@ const DEFAULT_CONFIG: Required<StatusUpdateConfig> = {
   updateIntervalMs: 5000,
   showPhases: true,
   showElapsedTime: true,
-  markFinalWithCheckmark: true,
+  markFinalWithCheckmark: false,
   elapsedTimeThresholdMs: 3000,
 };
 
@@ -200,14 +200,7 @@ export class StatusUpdateController {
 
     if (!this.isEnabled()) return finalText;
 
-    // If we have a final text and config says to mark with checkmark
-    if (finalText && this.config.markFinalWithCheckmark) {
-      // NOTE: We rely on Telegram delivery to do the edit/replacement, so we just format
-
-      const marked = `${finalText.trimEnd()} ✅`;
-
-      return marked;
-    }
+    // The final message is returned, relying on message deletion/cleanup.
 
     // Clean up status message if it exists and we're not editing
     if (this.state.statusMessageId && this.callbacks.deleteStatus) {

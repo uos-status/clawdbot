@@ -525,8 +525,7 @@ export const StatusUpdateSchema = z
     showPhases: z.boolean().optional(),
     /** Show elapsed time in status messages (default: true). */
     showElapsedTime: z.boolean().optional(),
-    /** Mark final responses with ✅ (default: true). */
-    markFinalWithCheckmark: z.boolean().optional(),
+
     /** Minimum duration before showing elapsed time (ms, default: 3000). */
     elapsedTimeThresholdMs: z.number().int().nonnegative().optional(),
   })

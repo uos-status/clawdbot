@@ -57,4 +57,6 @@ export type ReplyPayload = {
   isStatusMessage?: boolean;
   isError?: boolean;
   editMessageId?: string;
+  /** Whether this payload should replace the last status message (provider-specific logic). */
+  replaceStatus?: boolean;
 };

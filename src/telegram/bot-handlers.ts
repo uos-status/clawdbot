@@ -477,6 +477,11 @@ export const registerTelegramHandlers = ({
       // Text fragment handling - Telegram splits long pastes into multiple inbound messages (~4096 chars).
       // We buffer “near-limit” messages and append immediately-following parts.
       const text = typeof msg.text === "string" ? msg.text : undefined;
+      if (text) {
+        console.error(
+          `[CRITICAL LOG] [telegram/bot-handlers.ts] Received message ${msg.message_id} in ${chatId}: ${JSON.stringify(msg)}`,
+        );
+      }
       const isCommandLike = (text ?? "").trim().startsWith("/");
       if (text && !isCommandLike) {
         const nowMs = Date.now();

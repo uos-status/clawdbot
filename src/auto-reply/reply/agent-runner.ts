@@ -586,17 +586,14 @@ export async function runReplyAgent(params: {
     }
 
     // ===== STATUS UPDATES: Complete and mark final response =====
-    if (statusUpdateContext && finalPayloads.length > 0) {
-      const lastPayload = finalPayloads[finalPayloads.length - 1];
+    if (statusUpdateContext && replyPayloads.length > 0) {
+      const lastPayload = replyPayloads[replyPayloads.length - 1];
       if (lastPayload?.text) {
-        log.info(`Completing status update with final text`);
+        log.info(`[agent-runner] Completing status update with final text (fast-path)`);
         const markedText = await completeStatusUpdate(statusUpdateContext, lastPayload.text);
-
-        if (statusUpdateContext.controller?.wasEditedInPlace()) {
-          log.info(`Status update edited in place, skipping duplicate final message`);
-          finalPayloads.pop();
-        } else if (markedText && markedText !== lastPayload.text) {
-          finalPayloads[finalPayloads.length - 1] = { ...lastPayload, text: markedText };
+        if (markedText) {
+          // Just update the text. The delivery layer handles replacement.
+          replyPayloads[replyPayloads.length - 1] = { ...lastPayload, text: markedText };
         }
       }
     }

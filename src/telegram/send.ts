@@ -19,11 +19,7 @@ import { resolveTelegramFetch } from "./fetch.js";
 import { renderTelegramHtmlText } from "./format.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
 import { splitTelegramCaption } from "./caption.js";
-import {
-  getLastStatusMessage,
-  recordSentMessage,
-  recordStatusMessage,
-} from "./sent-message-cache.js";
+import { getLastSentMessage, recordSentMessage } from "./sent-message-cache.js";
 import { parseTelegramTarget, stripTelegramInternalPrefixes } from "./targets.js";
 import { resolveTelegramVoiceSend } from "./voice.js";
 import { buildTelegramThreadParams } from "./bot/helpers.js";
@@ -211,11 +207,11 @@ export async function sendMessageTelegram(
   // If this is a status message, try to edit the last status message in the chat
   // if it was sent recently.
   if (opts.isStatusMessage && !mediaUrl && !opts.asVoice && text) {
-    const lastStatus = getLastStatusMessage(chatId);
+    const lastSent = getLastSentMessage(chatId);
     const now = Date.now();
     const STATUS_WINDOW_MS = 10000;
 
-    if (lastStatus && now - lastStatus.timestamp < STATUS_WINDOW_MS) {
+    if (lastSent && lastSent.isStatus && now - lastSent.timestamp < STATUS_WINDOW_MS) {
       try {
         const editOpts: TelegramEditOpts = {
           token: opts.token,
@@ -226,22 +222,22 @@ export async function sendMessageTelegram(
           textMode: opts.textMode,
           buttons: opts.buttons,
         };
-        await editMessageTelegram(chatId, lastStatus.messageId, text, editOpts);
+        await editMessageTelegram(chatId, lastSent.messageId, text, editOpts);
 
-        // Update timestamp
-        recordStatusMessage(chatId, lastStatus.messageId);
+        // Update timestamp, keep isStatus=true
+        recordSentMessage(chatId, lastSent.messageId, true);
 
         return {
-          messageId: String(lastStatus.messageId),
+          messageId: String(lastSent.messageId),
           chatId: chatId,
         };
       } catch (err) {
         const errText = formatErrorMessage(err);
         // "message is not modified" means content was identical; treat as success.
         if (/message is not modified/i.test(errText)) {
-          recordStatusMessage(chatId, lastStatus.messageId);
+          recordSentMessage(chatId, lastSent.messageId, true);
           return {
-            messageId: String(lastStatus.messageId),
+            messageId: String(lastSent.messageId),
             chatId: chatId,
           };
         }
@@ -291,6 +287,11 @@ export async function sendMessageTelegram(
         throw wrapChatNotFound(err);
       },
     );
+    if (res?.message_id) {
+      console.error(
+        `[CRITICAL LOG] [telegram/send.ts] Sent message ${res.message_id} to ${chatId}. Payload: ${JSON.stringify({ text: rawText, params: sendParams })}`,
+      );
+    }
     return res;
   };
 
@@ -375,9 +376,9 @@ export async function sendMessageTelegram(
     const resolvedChatId = String(result?.chat?.id ?? chatId);
     if (result?.message_id) {
       if (opts.isStatusMessage) {
-        recordStatusMessage(chatId, result.message_id);
+        recordSentMessage(chatId, result.message_id, true);
       } else {
-        recordSentMessage(chatId, result.message_id);
+        recordSentMessage(chatId, result.message_id, false);
       }
     }
     recordChannelActivity({
@@ -421,9 +422,9 @@ export async function sendMessageTelegram(
   const messageId = String(res?.message_id ?? "unknown");
   if (res?.message_id) {
     if (opts.isStatusMessage) {
-      recordStatusMessage(chatId, res.message_id);
+      recordSentMessage(chatId, Number(res.message_id), true);
     } else {
-      recordSentMessage(chatId, res.message_id);
+      recordSentMessage(chatId, Number(res.message_id), false);
     }
   }
   recordChannelActivity({
@@ -566,7 +567,9 @@ export async function editMessageTelegram(
         }),
       "editMessage",
     );
-    logVerbose(`[telegram] Edited message ${messageId} in chat ${chatId}`);
+    console.error(
+      `[CRITICAL LOG] [telegram/send.ts] Edited message ${messageId} in chat ${chatId}. Payload: ${JSON.stringify({ text, htmlText })}`,
+    );
   } catch (err) {
     // If HTML parsing fails, fall back to plain text
     const errText = formatErrorMessage(err);

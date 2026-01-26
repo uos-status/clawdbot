@@ -154,6 +154,10 @@ export class StatusUpdateController {
     return this.editedInPlace;
   }
 
+  getStatusMessageId(): string | undefined {
+    return this.state.statusMessageId;
+  }
+
   supportsEdit(): boolean {
     return this.callbacks.supportsEdit?.() ?? false;
   }

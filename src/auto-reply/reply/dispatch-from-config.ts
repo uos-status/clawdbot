@@ -3,6 +3,7 @@ import type { FinalizedMsgContext } from "../templating.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { describeFailoverError } from "../../agents/failover-error.js";
 import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
 import { isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
@@ -450,6 +451,43 @@ export async function dispatchReplyFromConfig(params: {
     markIdle("message_completed");
     return { queuedFinal, counts };
   } catch (err) {
+    // Best-effort user-visible failure reply.
+    // Without this, provider/model failures can bubble up and leave the user "on read".
+    try {
+      const counts = dispatcher.getQueuedCounts();
+      const shouldSend = (counts?.final ?? 0) === 0;
+      if (shouldSend) {
+        const reason = describeFailoverError(err).reason;
+        const text =
+          reason === "billing"
+            ? "LLM request failed (billing). Fix provider credits/billing for the configured model, then try again."
+            : reason === "auth"
+              ? "LLM request failed (auth). Fix provider API key/permissions for the configured model, then try again."
+              : reason === "rate_limit"
+                ? "LLM request failed (rate_limit). Try again in a bit."
+                : reason === "timeout"
+                  ? "LLM request failed (timeout). Try again."
+                  : "LLM request failed. Check gateway logs.";
+
+        const payload = { text } satisfies ReplyPayload;
+        if (shouldRouteToOriginating && originatingChannel && originatingTo) {
+          await routeReply({
+            payload,
+            channel: originatingChannel,
+            to: originatingTo,
+            sessionKey: ctx.SessionKey,
+            accountId: ctx.AccountId,
+            threadId: ctx.MessageThreadId,
+            cfg,
+          });
+        } else {
+          dispatcher.sendFinalReply(payload);
+          await dispatcher.waitForIdle().catch(() => undefined);
+        }
+      }
+    } catch {
+      // ignore
+    }
     recordProcessed("error", { error: String(err) });
     markIdle("message_error");
     throw err;

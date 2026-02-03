@@ -224,6 +224,8 @@ export const dispatchTelegramMessage = async ({
     skippedNonSilent: 0,
   };
 
+  let sentFallback = false;
+
   const { queuedFinal } = await dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
     cfg,
@@ -283,8 +285,9 @@ export const dispatchTelegramMessage = async ({
       },
     },
   });
+
   draftStream?.stop();
-  let sentFallback = false;
+
   if (!deliveryState.delivered && deliveryState.skippedNonSilent > 0) {
     const result = await deliverReplies({
       replies: [{ text: EMPTY_RESPONSE_FALLBACK }],

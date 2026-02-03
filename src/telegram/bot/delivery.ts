@@ -5,7 +5,7 @@ import type { MarkdownTableMode } from "../../config/types.base.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import type { StickerMetadata, TelegramContext } from "./types.js";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "../../auto-reply/chunk.js";
-import { danger, logVerbose } from "../../globals.js";
+import { danger, logVerbose, warn } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { mediaKindFromMime } from "../../media/constants.js";
 import { fetchRemoteMedia } from "../../media/fetch.js";
@@ -19,6 +19,7 @@ import {
   markdownToTelegramHtml,
   renderTelegramHtmlText,
 } from "../format.js";
+import { buildTelegramHourglassKey, deletePriorTelegramHourglass } from "../outbound-status.js";
 import { buildInlineKeyboard } from "../send.js";
 import { cacheSticker, getCachedSticker } from "../sticker-cache.js";
 import { resolveTelegramVoiceSend } from "../voice.js";
@@ -31,6 +32,22 @@ import {
 const PARSE_ERR_RE = /can't parse entities|parse entities|find end of the entity/i;
 const VOICE_FORBIDDEN_RE = /VOICE_MESSAGES_FORBIDDEN/;
 
+function formatOutboundPreview(text: string, limit = 140): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+  return `${normalized.slice(0, limit - 1)}…`;
+}
+
+function logTelegramOutbound(runtime: RuntimeEnv, message: string): void {
+  // Match the same visible logging path as TypingController (defaultRuntime.log).
+  runtime.log?.(warn(`DEBUG: ${message}`));
+}
+
 export async function deliverReplies(params: {
   replies: ReplyPayload[];
   chatId: string;
@@ -42,6 +59,8 @@ export async function deliverReplies(params: {
   thread?: TelegramThreadSpec | null;
   tableMode?: MarkdownTableMode;
   chunkMode?: ChunkMode;
+  /** Provider account id (multi-account). */
+  accountId?: string;
   /** Callback invoked before sending a voice message to switch typing indicator. */
   onVoiceRecording?: () => Promise<void> | void;
   /** Controls whether link previews are shown. Default: true (previews enabled). */
@@ -60,6 +79,20 @@ export async function deliverReplies(params: {
     linkPreview,
     replyQuoteText,
   } = params;
+
+  // Cleanup: delete any previous "⏳" status/progress message for this target before
+  // sending the next real reply.
+  await deletePriorTelegramHourglass({
+    api: bot.api as unknown as {
+      deleteMessage: (chatId: string, messageId: number) => Promise<unknown>;
+    },
+    chatId,
+    key: buildTelegramHourglassKey({
+      chatId,
+      messageThreadId: thread?.id ?? null,
+    }),
+    log: (message) => runtime.log?.(warn(`DEBUG: ${message}`)),
+  });
   const chunkMode = params.chunkMode ?? "length";
   let hasReplied = false;
   let hasDelivered = false;
@@ -171,25 +204,49 @@ export async function deliverReplies(params: {
         }),
       };
       if (isGif) {
-        await withTelegramApiErrorLogging({
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendAnimation chatId=${chatId} thread=${thread?.id ?? ""} file=${JSON.stringify(fileName)} captionLen=${caption?.length ?? 0}`,
+        );
+        const res = await withTelegramApiErrorLogging({
           operation: "sendAnimation",
           runtime,
           fn: () => bot.api.sendAnimation(chatId, file, { ...mediaParams }),
         });
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendAnimation ok chatId=${chatId} messageId=${(res as { message_id?: number }).message_id ?? ""}`,
+        );
         markDelivered();
       } else if (kind === "image") {
-        await withTelegramApiErrorLogging({
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendPhoto chatId=${chatId} thread=${thread?.id ?? ""} file=${JSON.stringify(fileName)} captionLen=${caption?.length ?? 0}`,
+        );
+        const res = await withTelegramApiErrorLogging({
           operation: "sendPhoto",
           runtime,
           fn: () => bot.api.sendPhoto(chatId, file, { ...mediaParams }),
         });
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendPhoto ok chatId=${chatId} messageId=${(res as { message_id?: number }).message_id ?? ""}`,
+        );
         markDelivered();
       } else if (kind === "video") {
-        await withTelegramApiErrorLogging({
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendVideo chatId=${chatId} thread=${thread?.id ?? ""} file=${JSON.stringify(fileName)} captionLen=${caption?.length ?? 0}`,
+        );
+        const res = await withTelegramApiErrorLogging({
           operation: "sendVideo",
           runtime,
           fn: () => bot.api.sendVideo(chatId, file, { ...mediaParams }),
         });
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendVideo ok chatId=${chatId} messageId=${(res as { message_id?: number }).message_id ?? ""}`,
+        );
         markDelivered();
       } else if (kind === "audio") {
         const { useVoice } = resolveTelegramVoiceSend({
@@ -203,12 +260,20 @@ export async function deliverReplies(params: {
           // Switch typing indicator to record_voice before sending.
           await params.onVoiceRecording?.();
           try {
-            await withTelegramApiErrorLogging({
+            logTelegramOutbound(
+              runtime,
+              `telegram outbound (src/telegram/bot/delivery.ts): sendVoice chatId=${chatId} thread=${thread?.id ?? ""} file=${JSON.stringify(fileName)} captionLen=${caption?.length ?? 0}`,
+            );
+            const res = await withTelegramApiErrorLogging({
               operation: "sendVoice",
               runtime,
               shouldLog: (err) => !isVoiceMessagesForbidden(err),
               fn: () => bot.api.sendVoice(chatId, file, { ...mediaParams }),
             });
+            logTelegramOutbound(
+              runtime,
+              `telegram outbound (src/telegram/bot/delivery.ts): sendVoice ok chatId=${chatId} messageId=${(res as { message_id?: number }).message_id ?? ""}`,
+            );
             markDelivered();
           } catch (voiceErr) {
             // Fall back to text if voice messages are forbidden in this chat.
@@ -244,19 +309,35 @@ export async function deliverReplies(params: {
           }
         } else {
           // Audio file - displays with metadata (title, duration) - DEFAULT
-          await withTelegramApiErrorLogging({
+          logTelegramOutbound(
+            runtime,
+            `telegram outbound (src/telegram/bot/delivery.ts): sendAudio chatId=${chatId} thread=${thread?.id ?? ""} file=${JSON.stringify(fileName)} captionLen=${caption?.length ?? 0}`,
+          );
+          const res = await withTelegramApiErrorLogging({
             operation: "sendAudio",
             runtime,
             fn: () => bot.api.sendAudio(chatId, file, { ...mediaParams }),
           });
+          logTelegramOutbound(
+            runtime,
+            `telegram outbound (src/telegram/bot/delivery.ts): sendAudio ok chatId=${chatId} messageId=${(res as { message_id?: number }).message_id ?? ""}`,
+          );
           markDelivered();
         }
       } else {
-        await withTelegramApiErrorLogging({
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendDocument chatId=${chatId} thread=${thread?.id ?? ""} file=${JSON.stringify(fileName)} captionLen=${caption?.length ?? 0}`,
+        );
+        const res = await withTelegramApiErrorLogging({
           operation: "sendDocument",
           runtime,
           fn: () => bot.api.sendDocument(chatId, file, { ...mediaParams }),
         });
+        logTelegramOutbound(
+          runtime,
+          `telegram outbound (src/telegram/bot/delivery.ts): sendDocument ok chatId=${chatId} messageId=${(res as { message_id?: number }).message_id ?? ""}`,
+        );
         markDelivered();
       }
       if (replyToId && !hasReplied) {
@@ -526,6 +607,11 @@ async function sendTelegramText(
   const linkPreviewOptions = linkPreviewEnabled ? undefined : { is_disabled: true };
   const textMode = opts?.textMode ?? "markdown";
   const htmlText = textMode === "html" ? text : markdownToTelegramHtml(text);
+  const preview = formatOutboundPreview(opts?.plainText ?? "", 140);
+  logTelegramOutbound(
+    runtime,
+    `telegram outbound (src/telegram/bot/delivery.ts): sendMessage chatId=${chatId} replyTo=${opts?.replyToMessageId ?? ""} thread=${opts?.thread?.id ?? ""} len=${(opts?.plainText ?? text).length}${preview ? ` preview=${JSON.stringify(preview)}` : ""}`,
+  );
   try {
     const res = await withTelegramApiErrorLogging({
       operation: "sendMessage",
@@ -539,6 +625,10 @@ async function sendTelegramText(
           ...baseParams,
         }),
     });
+    logTelegramOutbound(
+      runtime,
+      `telegram outbound (src/telegram/bot/delivery.ts): sendMessage ok chatId=${chatId} messageId=${res.message_id}`,
+    );
     return res.message_id;
   } catch (err) {
     const errText = formatErrorMessage(err);
@@ -555,6 +645,10 @@ async function sendTelegramText(
             ...baseParams,
           }),
       });
+      logTelegramOutbound(
+        runtime,
+        `telegram outbound (src/telegram/bot/delivery.ts): sendMessage fallback ok chatId=${chatId} messageId=${res.message_id}`,
+      );
       return res.message_id;
     }
     throw err;

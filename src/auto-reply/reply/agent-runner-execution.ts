@@ -287,6 +287,7 @@ export async function runAgentTurnWithFallback(params: {
             abortSignal: params.opts?.abortSignal,
             blockReplyBreak: params.resolvedBlockStreamingBreak,
             blockReplyChunking: params.blockReplyChunking,
+            onModelPayload: params.opts?.onModelPayload,
             onPartialReply: allowPartialStream
               ? async (payload) => {
                   const textForTyping = await handlePartialForTyping(payload);

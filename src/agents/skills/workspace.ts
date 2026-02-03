@@ -44,20 +44,23 @@ function debugSkillCommandOnce(
 function filterSkillEntries(
   entries: SkillEntry[],
   config?: OpenClawConfig,
-  skillFilter?: string[],
+  skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean),
   eligibility?: SkillEligibilityContext,
 ): SkillEntry[] {
   let filtered = entries.filter((entry) => shouldIncludeSkill({ entry, config, eligibility }));
-  // If skillFilter is provided, only include skills in the filter list.
-  if (skillFilter !== undefined) {
-    const normalized = skillFilter.map((entry) => String(entry).trim()).filter(Boolean);
-    const label = normalized.length > 0 ? normalized.join(", ") : "(none)";
-    console.log(`[skills] Applying skill filter: ${label}`);
-    filtered =
-      normalized.length > 0
-        ? filtered.filter((entry) => normalized.includes(entry.skill.name))
-        : [];
-    console.log(`[skills] After filter: ${filtered.map((entry) => entry.skill.name).join(", ")}`);
+  if (skillFilter) {
+    if (Array.isArray(skillFilter)) {
+      const normalized = skillFilter.map((entry) => String(entry).trim()).filter(Boolean);
+      const label = normalized.length > 0 ? normalized.join(", ") : "(none)";
+      console.log(`[skills] Applying skill filter: ${label}`);
+      filtered =
+        normalized.length > 0
+          ? filtered.filter((entry) => normalized.includes(entry.skill.name))
+          : [];
+      console.log(`[skills] After filter: ${filtered.map((entry) => entry.skill.name).join(", ")}`);
+    } else {
+      filtered = filtered.filter((entry) => skillFilter({ skill: entry }));
+    }
   }
   return filtered;
 }
@@ -196,7 +199,7 @@ export function buildWorkspaceSkillSnapshot(
     bundledSkillsDir?: string;
     entries?: SkillEntry[];
     /** If provided, only include skills with these names */
-    skillFilter?: string[];
+    skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean);
     eligibility?: SkillEligibilityContext;
     snapshotVersion?: number;
   },
@@ -233,7 +236,7 @@ export function buildWorkspaceSkillsPrompt(
     bundledSkillsDir?: string;
     entries?: SkillEntry[];
     /** If provided, only include skills with these names */
-    skillFilter?: string[];
+    skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean);
     eligibility?: SkillEligibilityContext;
   },
 ): string {
@@ -338,7 +341,7 @@ export function buildWorkspaceSkillCommandSpecs(
     managedSkillsDir?: string;
     bundledSkillsDir?: string;
     entries?: SkillEntry[];
-    skillFilter?: string[];
+    skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean);
     eligibility?: SkillEligibilityContext;
     reservedNames?: Set<string>;
   },

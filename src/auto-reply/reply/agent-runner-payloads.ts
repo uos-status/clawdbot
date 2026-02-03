@@ -32,6 +32,7 @@ export function buildReplyPayloads(params: {
   >[0]["messagingToolSentTargets"];
   originatingTo?: string;
   accountId?: string;
+  editMessageId?: string;
 }): { replyPayloads: ReplyPayload[]; didLogHeartbeatStrip: boolean } {
   let didLogHeartbeatStrip = params.didLogHeartbeatStrip;
   const sanitizedPayloads = params.isHeartbeat
@@ -114,8 +115,16 @@ export function buildReplyPayloads(params: {
         : dedupedPayloads;
   const replyPayloads = suppressMessagingToolReplies ? [] : filteredPayloads;
 
+  const finalPayloads = params.editMessageId
+    ? replyPayloads.map((p) => ({
+        ...p,
+        isStatusUpdate: true,
+        editMessageId: params.editMessageId,
+      }))
+    : replyPayloads;
+
   return {
-    replyPayloads,
+    replyPayloads: finalPayloads,
     didLogHeartbeatStrip,
   };
 }

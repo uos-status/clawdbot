@@ -140,7 +140,13 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
             await sleep(delayMs);
           }
         }
-        await options.deliver(normalized, { kind });
+        try {
+          await options.deliver(normalized, { kind });
+        } catch (deliverErr) {
+          // Log specific delivery error for bug hunting
+          console.error(`DEBUG: Delivery error in dispatcher (${kind}):`, deliverErr);
+          throw deliverErr;
+        }
       })
       .catch((err) => {
         options.onError?.(err, { kind });

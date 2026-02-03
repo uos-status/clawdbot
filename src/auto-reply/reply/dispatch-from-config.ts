@@ -317,7 +317,7 @@ export async function dispatchReplyFromConfig(params: {
                 return run();
               }
             : undefined,
-        onBlockReply: (payload: ReplyPayload, context) => {
+        onBlockReply: (payload: ReplyPayload, context?: any) => {
           const run = async () => {
             // Accumulate block text for TTS generation after streaming
             if (payload.text) {

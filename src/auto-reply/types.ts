@@ -39,6 +39,8 @@ export type GetReplyOptions = {
   skillFilter?: string[];
   /** Mutable ref to track if a reply was sent (for Slack "first" threading mode). */
   hasRepliedRef?: { value: boolean };
+  /** Callback for raw model payloads (usage tracking, etc). */
+  onModelPayload?: (payload: unknown) => Promise<void>;
 };
 
 export type ReplyPayload = {
@@ -54,4 +56,8 @@ export type ReplyPayload = {
   isError?: boolean;
   /** Channel-specific payload data (per-channel envelope). */
   channelData?: Record<string, unknown>;
+  /** True when this payload is a status update (should edit previous message). */
+  isStatusUpdate?: boolean;
+  /** ID of the message to edit (for status updates). */
+  editMessageId?: string;
 };

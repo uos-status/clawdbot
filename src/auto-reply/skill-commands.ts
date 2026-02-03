@@ -1,7 +1,11 @@
 import fs from "node:fs";
 import type { OpenClawConfig } from "../config/config.js";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
-import { buildWorkspaceSkillCommandSpecs, type SkillCommandSpec } from "../agents/skills.js";
+import {
+  buildWorkspaceSkillCommandSpecs,
+  type SkillCommandSpec,
+  type SkillEntry,
+} from "../agents/skills.js";
 import { getRemoteSkillEligibility } from "../infra/skills-remote.js";
 import { listChatCommands } from "./commands-registry.js";
 
@@ -25,7 +29,7 @@ function resolveReservedCommandNames(): Set<string> {
 export function listSkillCommandsForWorkspace(params: {
   workspaceDir: string;
   cfg: OpenClawConfig;
-  skillFilter?: string[];
+  skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean);
 }): SkillCommandSpec[] {
   return buildWorkspaceSkillCommandSpecs(params.workspaceDir, {
     config: params.cfg,

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { SkillEntry } from "../../agents/skills/types.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveUserTimezone } from "../../agents/date-time.js";
 import { buildWorkspaceSkillSnapshot } from "../../agents/skills.js";
@@ -161,7 +162,7 @@ export async function ensureSkillSnapshot(params: {
   workspaceDir: string;
   cfg: OpenClawConfig;
   /** If provided, only load skills with these names (for per-channel skill filtering) */
-  skillFilter?: string[];
+  skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean);
 }): Promise<{
   sessionEntry?: SessionEntry;
   skillsSnapshot?: SessionEntry["skillsSnapshot"];

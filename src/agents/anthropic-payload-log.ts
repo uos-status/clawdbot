@@ -173,12 +173,16 @@ export function createAnthropicPayloadLogger(params: {
     writer.write(`${line}\n`);
   };
 
-  const wrapStreamFn: AnthropicPayloadLogger["wrapStreamFn"] = (streamFn) => {
+  const wrapStreamFn = <T extends StreamFn>(
+    streamFn: T,
+    onModelPayload?: (payload: unknown) => Promise<void>,
+  ): T => {
     const wrapped: StreamFn = (model, context, options) => {
       if (!isAnthropicModel(model)) {
         return streamFn(model, context, options);
       }
       const nextOnPayload = (payload: unknown) => {
+        void onModelPayload?.(payload);
         record({
           ...base,
           ts: new Date().toISOString(),
@@ -193,7 +197,7 @@ export function createAnthropicPayloadLogger(params: {
         onPayload: nextOnPayload,
       });
     };
-    return wrapped;
+    return wrapped as T;
   };
 
   const recordUsage: AnthropicPayloadLogger["recordUsage"] = (messages, error) => {

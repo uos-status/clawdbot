@@ -8,7 +8,7 @@ import { type ApiClientOptions, Bot, HttpError, InputFile } from "grammy";
 import type { RetryConfig } from "../infra/retry.js";
 import { loadConfig } from "../config/config.js";
 import { resolveMarkdownTableMode } from "../config/markdown-tables.js";
-import { logVerbose } from "../globals.js";
+import { logVerbose, warn } from "../globals.js";
 import { recordChannelActivity } from "../infra/channel-activity.js";
 import { isDiagnosticFlagEnabled } from "../infra/diagnostic-flags.js";
 import { formatErrorMessage, formatUncaughtError } from "../infra/errors.js";
@@ -17,6 +17,7 @@ import { redactSensitiveText } from "../logging/redact.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { mediaKindFromMime } from "../media/constants.js";
 import { isGifMedia } from "../media/mime.js";
+import { defaultRuntime } from "../runtime.js";
 import { loadWebMedia } from "../web/media.js";
 import { type ResolvedTelegramAccount, resolveTelegramAccount } from "./accounts.js";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
@@ -25,6 +26,13 @@ import { splitTelegramCaption } from "./caption.js";
 import { resolveTelegramFetch } from "./fetch.js";
 import { renderTelegramHtmlText } from "./format.js";
 import { isRecoverableTelegramNetworkError } from "./network-errors.js";
+import {
+  buildTelegramHourglassKey,
+  clearTelegramHourglass,
+  deletePriorTelegramHourglass,
+  isTelegramHourglassStatusText,
+  trackTelegramHourglass,
+} from "./outbound-status.js";
 import { makeProxyFetch } from "./proxy.js";
 import { recordSentMessage } from "./sent-message-cache.js";
 import { parseTelegramTarget, stripTelegramInternalPrefixes } from "./targets.js";
@@ -237,6 +245,22 @@ export async function sendMessageTelegram(
     }
   }
   const hasThreadParams = Object.keys(threadParams).length > 0;
+
+  // Telegram hourglass cleanup: status messages are sent via sendMessageTelegram,
+  // while AI replies use telegram bot delivery. Keep a single in-memory tracker
+  // so we can delete the prior "⏳" message before sending the next message.
+  const hourglassKey = buildTelegramHourglassKey({
+    chatId,
+    messageThreadId: messageThreadId ?? null,
+  });
+  await deletePriorTelegramHourglass({
+    api: api as unknown as {
+      deleteMessage: (chatId: string, messageId: number) => Promise<unknown>;
+    },
+    chatId,
+    key: hourglassKey,
+    log: (message) => defaultRuntime.log(warn(`DEBUG: ${message}`)),
+  });
   const request = createTelegramRetryRunner({
     retry: opts.retry,
     configRetry: account.config.retry,
@@ -425,12 +449,28 @@ export async function sendMessageTelegram(
             }
           : undefined;
       const textRes = await sendTelegramText(followUpText, textParams);
+      if (isTelegramHourglassStatusText(followUpText)) {
+        const id = textRes?.message_id;
+        if (typeof id === "number") {
+          trackTelegramHourglass({ key: hourglassKey, messageId: id });
+          defaultRuntime.log(
+            warn(
+              `DEBUG: telegram outbound (src/telegram/send.ts): tracked ⏳ messageId=${id} chatId=${chatId} thread=${messageThreadId ?? ""}`,
+            ),
+          );
+        }
+      } else {
+        clearTelegramHourglass(hourglassKey);
+      }
       // Return the text message ID as the "main" message (it's the actual content).
       return {
         messageId: String(textRes?.message_id ?? mediaMessageId),
         chatId: resolvedChatId,
       };
     }
+
+    // Media-only or media-with-caption (caption is not treated as a status message).
+    clearTelegramHourglass(hourglassKey);
 
     return { messageId: mediaMessageId, chatId: resolvedChatId };
   }
@@ -455,6 +495,20 @@ export async function sendMessageTelegram(
     accountId: account.accountId,
     direction: "outbound",
   });
+
+  if (isTelegramHourglassStatusText(text)) {
+    const id = res?.message_id;
+    if (typeof id === "number") {
+      trackTelegramHourglass({ key: hourglassKey, messageId: id });
+      defaultRuntime.log(
+        warn(
+          `DEBUG: telegram outbound (src/telegram/send.ts): tracked ⏳ messageId=${id} chatId=${chatId} thread=${messageThreadId ?? ""}`,
+        ),
+      );
+    }
+  } else {
+    clearTelegramHourglass(hourglassKey);
+  }
   return { messageId, chatId: String(res?.chat?.id ?? chatId) };
 }
 

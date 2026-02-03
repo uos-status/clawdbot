@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import type { MsgContext, TemplateContext } from "../templating.js";
+import type { MsgContext, OriginatingChannelType, TemplateContext } from "../templating.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { buildCommandContext } from "./commands.js";
 import type { InlineDirectives } from "./directive-handling.js";
@@ -402,6 +402,41 @@ export async function runPreparedReply(
     },
   };
 
+  if (typingMode !== "never") {
+    const modelName = `${provider}/${model}`;
+    const initialText = `⏳ sending to ${modelName}...`;
+    await routeReply({
+      payload: { text: initialText },
+      channel: ctx.OriginatingChannel as unknown as OriginatingChannelType,
+      to: ctx.OriginatingTo as string,
+      sessionKey,
+      accountId: ctx.AccountId,
+      threadId: ctx.MessageThreadId,
+      cfg,
+    });
+  }
+
+  const onModelPayload = async (payload: unknown) => {
+    try {
+      const modelName = `${provider}/${model}`;
+      const payloadStr = JSON.stringify(payload);
+      const byteCount = payloadStr ? Buffer.byteLength(payloadStr, "utf8") : 0;
+      const newText = `⏳ sending ${byteCount} bytes to ${modelName}`;
+
+      await routeReply({
+        payload: { text: newText },
+        channel: ctx.OriginatingChannel as unknown as OriginatingChannelType,
+        to: ctx.OriginatingTo as string,
+        sessionKey,
+        accountId: ctx.AccountId,
+        threadId: ctx.MessageThreadId,
+        cfg,
+      });
+    } catch (err) {
+      logVerbose(`Failed to update status message: ${String(err)}`);
+    }
+  };
+
   return runReplyAgent({
     commandBody: prefixedCommandBody,
     followupRun,
@@ -411,7 +446,10 @@ export async function runPreparedReply(
     shouldFollowup,
     isActive,
     isStreaming,
-    opts,
+    opts: {
+      ...opts,
+      onModelPayload,
+    },
     typing,
     sessionEntry,
     sessionStore,

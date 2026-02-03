@@ -1,6 +1,6 @@
 import type { ChannelOutboundAdapter } from "../types.js";
 import { markdownToTelegramHtmlChunks } from "../../../telegram/format.js";
-import { sendMessageTelegram } from "../../../telegram/send.js";
+import { editMessageTelegram, sendMessageTelegram } from "../../../telegram/send.js";
 
 function parseReplyToMessageId(replyToId?: string | null) {
   if (!replyToId) {
@@ -80,6 +80,20 @@ export const telegramOutbound: ChannelOutboundAdapter = {
       quoteText,
       accountId: accountId ?? undefined,
     };
+
+    // Status update: edit existing message if editMessageId is present
+    if (payload.isStatusUpdate && payload.editMessageId && mediaUrls.length === 0) {
+      try {
+        const result = await editMessageTelegram(to, payload.editMessageId, text, {
+          ...baseOpts,
+          buttons: telegramData?.buttons,
+        });
+        return { channel: "telegram", ...result };
+      } catch (err) {
+        // Log and fall back to normal send if edit fails (e.g. message too old)
+        console.warn(`Telegram status edit failed, falling back to send:`, err);
+      }
+    }
 
     if (mediaUrls.length === 0) {
       const result = await send(to, text, {

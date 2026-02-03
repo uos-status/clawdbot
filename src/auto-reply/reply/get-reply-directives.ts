@@ -1,6 +1,6 @@
 import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import type { ModelAliasIndex } from "../../agents/model-selection.js";
-import type { SkillCommandSpec } from "../../agents/skills.js";
+import type { SkillCommandSpec, SkillEntry } from "../../agents/skills.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
@@ -108,7 +108,7 @@ export async function resolveReplyDirectives(params: {
   model: string;
   typing: TypingController;
   opts?: GetReplyOptions;
-  skillFilter?: string[];
+  skillFilter?: string[] | ((params: { skill: SkillEntry }) => boolean);
 }): Promise<ReplyDirectiveResult> {
   const {
     ctx,
@@ -362,18 +362,10 @@ export async function resolveReplyDirectives(params: {
       (agentCfg?.elevatedDefault as ElevatedLevel | undefined) ??
       "on")
     : "off";
-  const resolvedBlockStreaming =
-    opts?.disableBlockStreaming === true
-      ? "off"
-      : opts?.disableBlockStreaming === false
-        ? "on"
-        : agentCfg?.blockStreamingDefault === "on"
-          ? "on"
-          : "off";
+  const resolvedBlockStreaming = agentCfg?.blockStreamingDefault === "on" ? "on" : "off";
   const resolvedBlockStreamingBreak: "text_end" | "message_end" =
     agentCfg?.blockStreamingBreak === "message_end" ? "message_end" : "text_end";
-  const blockStreamingEnabled =
-    resolvedBlockStreaming === "on" && opts?.disableBlockStreaming !== true;
+  const blockStreamingEnabled = resolvedBlockStreaming === "on";
   const blockReplyChunking = blockStreamingEnabled
     ? resolveBlockStreamingChunking(cfg, sessionCtx.Provider, sessionCtx.AccountId)
     : undefined;

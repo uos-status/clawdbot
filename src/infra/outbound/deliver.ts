@@ -327,9 +327,10 @@ export async function deliverOutboundPayloads(params: {
     try {
       throwIfAborted(abortSignal);
       params.onPayload?.(payloadSummary);
+
       if (handler.sendPayload && payload.channelData) {
-        results.push(await handler.sendPayload(payload));
-        continue;
+        const result = await handler.sendPayload(payload);
+        results.push(result);
       }
       if (payloadSummary.mediaUrls.length === 0) {
         if (isSignalChannel) {
@@ -337,7 +338,6 @@ export async function deliverOutboundPayloads(params: {
         } else {
           await sendTextChunks(payloadSummary.text);
         }
-        continue;
       }
 
       let first = true;

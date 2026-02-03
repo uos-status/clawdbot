@@ -13,6 +13,8 @@ import type { ReplyPayload } from "../types.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveEffectiveMessagesConfig } from "../../agents/identity.js";
 import { normalizeChannelId } from "../../channels/plugins/index.js";
+import { warn } from "../../globals.js";
+import { defaultRuntime } from "../../runtime.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import { normalizeReplyPayload } from "./normalize-reply.js";
 
@@ -57,18 +59,31 @@ export type RouteReplyResult = {
 export async function routeReply(params: RouteReplyParams): Promise<RouteReplyResult> {
   const { payload, channel, to, accountId, threadId, cfg, abortSignal } = params;
 
+  // Status/progress messages are inferred from their leading marker.
+  // IMPORTANT: don't apply responsePrefix to these or downstream status detection breaks.
+  const isStatusMessage = (payload.text ?? "").trimStart().startsWith("⏳");
+  if (isStatusMessage) {
+    defaultRuntime.log(
+      warn(
+        `routeReply: status message; skipping responsePrefix (channel=${String(channel)} sessionKey=${params.sessionKey ?? ""})`,
+      ),
+    );
+  }
+
   // Debug: `pnpm test src/auto-reply/reply/route-reply.test.ts`
-  const responsePrefix = params.sessionKey
-    ? resolveEffectiveMessagesConfig(
-        cfg,
-        resolveSessionAgentId({
-          sessionKey: params.sessionKey,
-          config: cfg,
-        }),
-      ).responsePrefix
-    : cfg.messages?.responsePrefix === "auto"
-      ? undefined
-      : cfg.messages?.responsePrefix;
+  const responsePrefix = isStatusMessage
+    ? undefined
+    : params.sessionKey
+      ? resolveEffectiveMessagesConfig(
+          cfg,
+          resolveSessionAgentId({
+            sessionKey: params.sessionKey,
+            config: cfg,
+          }),
+        ).responsePrefix
+      : cfg.messages?.responsePrefix === "auto"
+        ? undefined
+        : cfg.messages?.responsePrefix;
   const normalized = normalizeReplyPayload(payload, {
     responsePrefix,
   });
@@ -113,6 +128,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
     // Provider docking: this is an execution boundary (we're about to send).
     // Keep the module cheap to import by loading outbound plumbing lazily.
     const { deliverOutboundPayloads } = await import("../../infra/outbound/deliver.js");
+    const shouldMirror = !isStatusMessage && params.mirror !== false && Boolean(params.sessionKey);
     const results = await deliverOutboundPayloads({
       cfg,
       channel: channelId,
@@ -123,7 +139,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       threadId: resolvedThreadId,
       abortSignal,
       mirror:
-        params.mirror !== false && params.sessionKey
+        shouldMirror && params.sessionKey
           ? {
               sessionKey: params.sessionKey,
               agentId: resolveSessionAgentId({ sessionKey: params.sessionKey, config: cfg }),

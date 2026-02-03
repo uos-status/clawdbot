@@ -475,7 +475,7 @@ export async function runEmbeddedAttempt(
         sessionManager,
         settingsManager,
       }));
-      applySystemPromptOverrideToSession(session, systemPromptOverride);
+      applySystemPromptOverrideToSession(session, systemPromptOverride());
       if (!session) {
         throw new Error("Embedded agent session missing");
       }
@@ -522,9 +522,7 @@ export async function runEmbeddedAttempt(
         activeSession.agent.streamFn = cacheTrace.wrapStreamFn(activeSession.agent.streamFn);
       }
       if (anthropicPayloadLogger) {
-        activeSession.agent.streamFn = anthropicPayloadLogger.wrapStreamFn(
-          activeSession.agent.streamFn,
-        );
+        anthropicPayloadLogger.wrapStreamFn(activeSession.agent.streamFn);
       }
 
       try {

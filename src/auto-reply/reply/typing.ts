@@ -85,6 +85,8 @@ export function createTypingController(params: {
         return;
       }
       log?.(`typing TTL reached (${formatTypingTtl(typingTtlMs)}); stopping typing indicator`);
+      // BUG HUNT: Log the state when TTL is reached
+      log?.(`DEBUG: Typing TTL reached. runComplete=${runComplete}, dispatchIdle=${dispatchIdle}`);
       cleanup();
     }, typingTtlMs);
   };
@@ -95,6 +97,8 @@ export function createTypingController(params: {
     if (sealed) {
       return;
     }
+    // BUG HUNT: Log when we actually trigger the platform call
+    log?.("DEBUG: Triggering typing indicator platform call");
     await onReplyStart?.();
   };
 
@@ -104,6 +108,7 @@ export function createTypingController(params: {
     }
     // Late callbacks after a run completed should never restart typing.
     if (runComplete) {
+      log?.("DEBUG: ensureStart called but runComplete is true, skipping");
       return;
     }
     if (!active) {
@@ -113,6 +118,7 @@ export function createTypingController(params: {
       return;
     }
     started = true;
+    log?.("DEBUG: Starting typing loop");
     await triggerTyping();
   };
 
@@ -122,6 +128,7 @@ export function createTypingController(params: {
     }
     // Stop only when the model run is done and the dispatcher queue is empty.
     if (runComplete && dispatchIdle) {
+      log?.("DEBUG: maybeStopOnIdle stopping typing: runComplete && dispatchIdle");
       cleanup();
     }
   };

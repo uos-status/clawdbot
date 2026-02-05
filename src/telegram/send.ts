@@ -25,6 +25,13 @@ import { splitTelegramCaption } from "./caption.js";
 import { resolveTelegramFetch } from "./fetch.js";
 import { renderTelegramHtmlText } from "./format.js";
 import { isRecoverableTelegramNetworkError } from "./network-errors.js";
+import {
+  buildTelegramHourglassKey,
+  clearTelegramHourglass,
+  deletePriorTelegramHourglass,
+  isTelegramHourglassStatusText,
+  trackTelegramHourglass,
+} from "./outbound-status.js";
 import { makeProxyFetch } from "./proxy.js";
 import { recordSentMessage } from "./sent-message-cache.js";
 import { parseTelegramTarget, stripTelegramInternalPrefixes } from "./targets.js";
@@ -237,6 +244,21 @@ export async function sendMessageTelegram(
     }
   }
   const hasThreadParams = Object.keys(threadParams).length > 0;
+
+  // Telegram hourglass cleanup: status messages are sent via sendMessageTelegram,
+  // while AI replies use telegram bot delivery. Keep a single in-memory tracker
+  // so we can delete the prior "⏳" message before sending the next message.
+  const hourglassKey = buildTelegramHourglassKey({
+    chatId,
+    messageThreadId: messageThreadId ?? null,
+  });
+  await deletePriorTelegramHourglass({
+    api: api as unknown as {
+      deleteMessage: (chatId: string, messageId: number) => Promise<unknown>;
+    },
+    chatId,
+    key: hourglassKey,
+  });
   const request = createTelegramRetryRunner({
     retry: opts.retry,
     configRetry: account.config.retry,
@@ -425,12 +447,23 @@ export async function sendMessageTelegram(
             }
           : undefined;
       const textRes = await sendTelegramText(followUpText, textParams);
+      if (isTelegramHourglassStatusText(followUpText)) {
+        const id = textRes?.message_id;
+        if (typeof id === "number") {
+          trackTelegramHourglass({ key: hourglassKey, messageId: id });
+        }
+      } else {
+        clearTelegramHourglass(hourglassKey);
+      }
       // Return the text message ID as the "main" message (it's the actual content).
       return {
         messageId: String(textRes?.message_id ?? mediaMessageId),
         chatId: resolvedChatId,
       };
     }
+
+    // Media-only or media-with-caption (caption is not treated as a status message).
+    clearTelegramHourglass(hourglassKey);
 
     return { messageId: mediaMessageId, chatId: resolvedChatId };
   }
@@ -455,6 +488,15 @@ export async function sendMessageTelegram(
     accountId: account.accountId,
     direction: "outbound",
   });
+
+  if (isTelegramHourglassStatusText(text)) {
+    const id = res?.message_id;
+    if (typeof id === "number") {
+      trackTelegramHourglass({ key: hourglassKey, messageId: id });
+    }
+  } else {
+    clearTelegramHourglass(hourglassKey);
+  }
   return { messageId, chatId: String(res?.chat?.id ?? chatId) };
 }
 

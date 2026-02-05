@@ -19,6 +19,7 @@ import {
   markdownToTelegramHtml,
   renderTelegramHtmlText,
 } from "../format.js";
+import { buildTelegramHourglassKey, deletePriorTelegramHourglass } from "../outbound-status.js";
 import { buildInlineKeyboard } from "../send.js";
 import { cacheSticker, getCachedSticker } from "../sticker-cache.js";
 import { resolveTelegramVoiceSend } from "../voice.js";
@@ -42,6 +43,8 @@ export async function deliverReplies(params: {
   thread?: TelegramThreadSpec | null;
   tableMode?: MarkdownTableMode;
   chunkMode?: ChunkMode;
+  /** Provider account id (multi-account). */
+  accountId?: string;
   /** Callback invoked before sending a voice message to switch typing indicator. */
   onVoiceRecording?: () => Promise<void> | void;
   /** Controls whether link previews are shown. Default: true (previews enabled). */
@@ -60,6 +63,19 @@ export async function deliverReplies(params: {
     linkPreview,
     replyQuoteText,
   } = params;
+
+  // Cleanup: delete any previous "⏳" status/progress message for this target before
+  // sending the next real reply.
+  await deletePriorTelegramHourglass({
+    api: bot.api as unknown as {
+      deleteMessage: (chatId: string, messageId: number) => Promise<unknown>;
+    },
+    chatId,
+    key: buildTelegramHourglassKey({
+      chatId,
+      messageThreadId: thread?.id ?? null,
+    }),
+  });
   const chunkMode = params.chunkMode ?? "length";
   let hasReplied = false;
   let hasDelivered = false;

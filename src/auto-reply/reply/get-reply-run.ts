@@ -405,6 +405,32 @@ export async function runPreparedReply(
     },
   };
 
+  // Core status/progress message: show which model we're sending to.
+  // This is best-effort and should never block the actual run.
+  if (typingMode !== "never") {
+    try {
+      const modelName = `${provider}/${model}`;
+      const inputChars = prefixedCommandBody.length;
+      const approxTokens = Math.ceil(inputChars / 4);
+      const ctxLimit = agentCfg?.contextTokens;
+      await routeReply({
+        payload: {
+          text: `⏳ sending to ${modelName} (chars=${inputChars} ~tok=${approxTokens}${ctxLimit ? ` ctx=${ctxLimit}` : ""})`,
+        },
+        // OriginatingChannel is already a normalized channel id; avoid plumbing new types here.
+        // oxlint-disable-next-line typescript/no-explicit-any
+        channel: ctx.OriginatingChannel as any,
+        to: ctx.OriginatingTo as string,
+        sessionKey,
+        accountId: ctx.AccountId,
+        threadId: ctx.MessageThreadId,
+        cfg,
+      });
+    } catch (err) {
+      logVerbose(`Failed to send status message: ${String(err)}`);
+    }
+  }
+
   return runReplyAgent({
     commandBody: prefixedCommandBody,
     followupRun,
